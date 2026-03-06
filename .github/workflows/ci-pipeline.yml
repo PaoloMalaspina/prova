@@ -23,29 +23,58 @@ jobs:
       - name: Run tests
         run: npm test || echo "No tests"
 
+      # Build Docker image in CI
       - name: Build Docker image
         run: |
           docker build -t its-node-demo:latest .
 
+      # Save image as artifact (compressed tar.gz)
+      - name: Save Docker image as artifact
+        run: |
+          docker save its-node-demo:latest | gzip > image.tar.gz
+
+      - name: Upload Docker image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-image
+          path: image.tar.gz
+          retention-days: 1   # per sicurezza
 
   deploy:
+    name: Load & Push to Docker Hub
     needs: build         # Solo se la build passa
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'   # Solo su main
     
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
+      # Download artifact from build job
+      - name: Download Docker image artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image
+
+      # Load the saved image (no rebuild!)
+      - name: Load Docker image
+        run: |
+          gunzip -c image.tar.gz | docker load
+
+      # Login to Docker Hub via secrets
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build image for push
+      # Tag the recovered image
+      - name: Tag Docker image
         run: |
-          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/its-node-demo:latest .
+          docker tag its-node-demo:latest \
+          ${{ secrets.DOCKERHUB_USERNAME }}/its-node-demo:latest
 
-      - name: Push to Docker Hub
+      # Push to Docker Hub
+      - name: Push Docker image to Docker Hub
         run: |
           docker push ${{ secrets.DOCKERHUB_USERNAME }}/its-node-demo:latest
